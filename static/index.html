@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Movie Streamer</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1b1d22; --muted: #6b7180;
+    --border: #e1e4ea; --accent: #2f6fed; --accent-text: #fff; --hover: #eef2fb;
+    --ok: #1f9d55; --err: #d64545; --log-bg: #0f1115; --log-text: #c9d1d9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111318; --panel: #1a1d24; --text: #e6e8ec; --muted: #8b93a3;
+      --border: #2a2f39; --accent: #5b8cff; --accent-text: #0b0d12; --hover: #232835;
+      --ok: #3ccf7f; --err: #ff6b6b; --log-bg: #0b0d11; --log-text: #b8c2cc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+           background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .out { color: var(--muted); font-size: 12px; margin-left: auto; min-width: 0;
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn.small { padding: 6px 10px; font-weight: 500; font-size: 13px; flex: none; }
+  .btn.primary-sm { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  #settings { display: none; padding: 16px; background: var(--panel);
+              border-bottom: 1px solid var(--border); }
+  #settings.show { display: block; }
+  #settings > * { max-width: 900px; }
+  .set-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 12px; }
+  @media (max-width: 640px) { .set-grid { grid-template-columns: 1fr; } }
+  .keyrow { display: flex; gap: 6px; }
+  .set-actions { display: flex; align-items: center; gap: 12px; }
+  .dest { font-size: 12px; color: var(--muted); margin-top: 12px; word-break: break-all; }
+  .dest a { color: var(--accent); cursor: pointer; }
+
+  /* Now playing */
+  #now { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+         display: none; }
+  #now.show { display: block; }
+  .now-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.live { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .dot.err { background: var(--err); }
+  .dot.prep { background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
+  @keyframes pulse { from { opacity: .3; } to { opacity: 1; } }
+  #nowTitle { font-weight: 600; flex: 1; min-width: 0; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }
+  #nowStats { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .seek { position: relative; padding: 9px 0; margin-top: 2px; cursor: pointer; touch-action: none; }
+  .seek:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .seek.disabled { cursor: default; }
+  .seek .track { position: relative; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .seek .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); width: 0; transition: width .5s linear; }
+  .seek .ghost { position: absolute; inset: 0 auto 0 0; width: 0;
+                 background: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .seek .tip { position: absolute; bottom: 100%; transform: translateX(-50%); display: none;
+               background: var(--text); color: var(--panel); font-size: 11px; padding: 2px 6px;
+               border-radius: 4px; pointer-events: none; white-space: nowrap;
+               font-variant-numeric: tabular-nums; }
+  .seek:not(.disabled):hover .tip { display: block; }
+  .times { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted);
+           font-variant-numeric: tabular-nums; }
+  .times .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; text-align: center; }
+
+  .side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .q-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .q-head h3 { margin: 0; font-size: 14px; flex: 1; }
+  .q-head h3 span { color: var(--muted); font-weight: 400; }
+  ol.queue { list-style: none; margin: 0; padding: 4px; max-height: 380px; overflow: auto; }
+  ol.queue li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; }
+  ol.queue li:hover { background: var(--hover); }
+  ol.queue .n { color: var(--muted); width: 18px; text-align: right; flex: none; font-size: 12px;
+                font-variant-numeric: tabular-nums; }
+  ol.queue .info { flex: 1; min-width: 0; }
+  ol.queue .t, ol.queue .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ol.queue .l { font-size: 11px; color: var(--muted); }
+  ol.queue li.q-empty { color: var(--muted); padding: 16px; justify-content: center; text-align: center; font-size: 13px; }
+  ol.queue li.q-empty:hover { background: none; }
+  .ib { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 4px 6px;
+        border-radius: 4px; font-size: 13px; flex: none; }
+  .ib:hover { background: var(--panel); color: var(--text); }
+  .ib:disabled { opacity: .25; cursor: default; background: none; }
+  .btnrow { display: flex; gap: 8px; }
+  .btnrow .btn { flex: 1; }
+  .ok-msg { color: var(--ok); font-size: 13px; margin-top: 10px; }
+  details.log { margin-top: 8px; }
+  details.log summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  pre#log { background: var(--log-bg); color: var(--log-text); padding: 10px; border-radius: 6px;
+            max-height: 240px; overflow: auto; font-size: 11px; white-space: pre-wrap;
+            word-break: break-all; margin: 6px 0 0; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 16px;
+         padding: 16px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+           overflow: hidden; }
+  .panel-head { padding: 12px; border-bottom: 1px solid var(--border); display: flex;
+                flex-direction: column; gap: 8px; }
+  .lib-tools { display: flex; gap: 8px; }
+  .lib-tools #sort { width: auto; flex: none; }
+  #crumbs { display: flex; flex-wrap: wrap; gap: 2px; font-size: 13px; }
+  #crumbs a { color: var(--accent); cursor: pointer; text-decoration: none; padding: 2px 4px;
+              border-radius: 4px; }
+  #crumbs a:hover { background: var(--hover); }
+  #crumbs span { color: var(--muted); padding: 2px 0; }
+  input, select, button { font: inherit; color: inherit; }
+  input[type=text], input[type=search], select {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  ul.list { list-style: none; margin: 0; padding: 4px; max-height: calc(100vh - 240px);
+            overflow: auto; min-height: 200px; }
+  ul.list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+               border-radius: 6px; cursor: pointer; }
+  ul.list li:hover { background: var(--hover); }
+  ul.list li.sel { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  ul.list .ico { flex: none; width: 18px; text-align: center; color: var(--muted); }
+  ul.list .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.list .sub { color: var(--muted); font-size: 12px; flex: none; }
+  ul.list .empty { color: var(--muted); cursor: default; justify-content: center; }
+  ul.list .empty:hover { background: none; }
+
+  #detail { padding: 16px; }
+  #detail h2 { font-size: 15px; margin: 0 0 4px; word-break: break-word; }
+  #detail .meta { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 14px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .btn { padding: 10px 16px; border-radius: 6px; border: 1px solid var(--border);
+         background: var(--panel); cursor: pointer; font-weight: 600; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); width: 100%; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--err); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .placeholder { color: var(--muted); text-align: center; padding: 48px 16px; }
+  .error { color: var(--err); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+  .vlc { margin-top: 14px; font-size: 12px; color: var(--muted); }
+  .vlc code { display: block; margin-top: 4px; padding: 6px 8px; background: var(--bg);
+              border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+              word-break: break-all; user-select: all; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Movie Streamer</h1>
+  <div class="out" id="outLabel"></div>
+  <button class="btn small" id="setBtn" aria-expanded="false">⚙ Stream settings</button>
+</header>
+
+<section id="settings">
+  <div class="set-grid">
+    <div class="field"><label for="sServer">Server</label>
+      <input type="text" id="sServer" placeholder="rtmp://your-vps-ip/live" autocomplete="off" spellcheck="false"></div>
+    <div class="field"><label for="sKey">Stream key</label>
+      <div class="keyrow">
+        <input type="password" id="sKey" placeholder="movie" autocomplete="off" spellcheck="false">
+        <button class="btn small" id="sShow" type="button">Show</button>
+      </div></div>
+  </div>
+  <div class="set-actions">
+    <button class="btn primary-sm" id="sSave">Save</button>
+    <span id="sMsg" class="hint"></span>
+  </div>
+  <div class="vlc">Watch in VLC (Media → Open Network Stream):<code id="vlcUrl"></code></div>
+</section>
+
+<section id="now">
+  <div class="now-row">
+    <span class="dot" id="nowDot"></span>
+    <span id="nowTitle"></span>
+    <span id="nowStats"></span>
+    <button class="btn small" id="nextBtn" title="Play the next movie in the queue">⏭ Next</button>
+    <button class="btn small danger" id="stopBtn">■ Stop</button>
+  </div>
+  <div class="seek disabled" id="seek" role="slider" tabindex="0" aria-label="Position — click to jump"
+       aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+    <div class="track"><div class="ghost" id="seekGhost"></div><div class="fill" id="nowBar"></div></div>
+    <div class="tip" id="seekTip"></div>
+  </div>
+  <div class="times"><span id="tPos"></span><span class="lbl" id="nowLabel"></span><span id="tDur"></span></div>
+  <details class="log"><summary>ffmpeg log</summary><pre id="log"></pre></details>
+</section>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <div id="crumbs"></div>
+      <div class="lib-tools">
+        <input type="search" id="search" placeholder="Search the whole library…" autocomplete="off">
+        <select id="sort" aria-label="Sort by">
+          <option value="name">Name A–Z</option>
+          <option value="name-desc">Name Z–A</option>
+          <option value="new">Newest added</option>
+          <option value="old">Oldest added</option>
+        </select>
+      </div>
+    </div>
+    <ul class="list" id="list"></ul>
+  </section>
+
+  <div class="side">
+    <section class="panel">
+      <div id="detail"><div class="placeholder">Select a movie to see its audio and subtitle tracks.</div></div>
+    </section>
+    <section class="panel">
+      <div class="q-head">
+        <h3>Up next <span id="qCount"></span></h3>
+        <button class="btn small" id="qStart">▶ Start queue</button>
+        <button class="btn small" id="qClear">Clear</button>
+      </div>
+      <ol class="queue" id="queue"></ol>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let cfg = {}, current = null, currentPath = "", duration = 0;
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function fmtTime(sec) {
+  if (sec == null || isNaN(sec)) return "--:--";
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
+}
+function parseTime(str) {
+  str = (str || "").trim();
+  if (!str) return 0;
+  const parts = str.split(":").map(Number);
+  if (parts.some(isNaN)) return NaN;
+  return parts.reduce((acc, p) => acc * 60 + p, 0);
+}
+function fmtSize(b) {
+  if (!b) return "";
+  const u = ["B","KB","MB","GB","TB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return b.toFixed(i > 2 ? 1 : 0) + " " + u[i];
+}
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+/* ---------- library ---------- */
+function renderCrumbs(path) {
+  const parts = path ? path.split("/") : [];
+  let html = `<a data-p="">Library</a>`, acc = "";
+  for (const p of parts) {
+    acc = acc ? acc + "/" + p : p;
+    html += `<span>/</span><a data-p="${esc(acc)}">${esc(p)}</a>`;
+  }
+  $("#crumbs").innerHTML = html;
+}
+$("#crumbs").addEventListener("click", e => {
+  if (e.target.dataset.p !== undefined) { $("#search").value = ""; browse(e.target.dataset.p); }
+});
+
+/* sorting: name (natural order, so "2 Fast" < "10 Things") or date added */
+let sortMode = "name", listing = null;
+try { sortMode = localStorage.getItem("sort") || "name"; } catch {}
+$("#sort").value = sortMode;
+const coll = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const SORTS = {
+  "name": (a, b) => coll.compare(a.name, b.name),
+  "name-desc": (a, b) => coll.compare(b.name, a.name),
+  "new": (a, b) => (b.added || 0) - (a.added || 0) || coll.compare(a.name, b.name),
+  "old": (a, b) => (a.added || 0) - (b.added || 0) || coll.compare(a.name, b.name),
+};
+const byDate = () => sortMode === "new" || sortMode === "old";
+const fmtDate = (t) => t ? new Date(t * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+$("#sort").addEventListener("change", () => {
+  sortMode = $("#sort").value;
+  try { localStorage.setItem("sort", sortMode); } catch {}
+  renderList();
+});
+
+function renderList() {
+  if (!listing) return;
+  const d = listing, sort = (arr) => [...arr].sort(SORTS[sortMode] || SORTS.name);
+  let html = "";
+  if (d.mode === "browse") {
+    if (d.path) {
+      const up = d.path.split("/").slice(0, -1).join("/");
+      html += `<li data-dir="${esc(up)}"><span class="ico">↩</span><span class="nm">..</span></li>`;
+    }
+    for (const x of sort(d.dirs)) html += `<li data-dir="${esc(x.path)}"><span class="ico">📁</span><span class="nm">${esc(x.name)}</span>${byDate() ? `<span class="sub">${fmtDate(x.added)}</span>` : ""}</li>`;
+    for (const f of sort(d.files)) html += `<li data-file="${esc(f.path)}"><span class="ico">🎬</span><span class="nm">${esc(f.name)}</span><span class="sub">${byDate() ? fmtDate(f.added) : fmtSize(f.size)}</span></li>`;
+    if (!d.dirs.length && !d.files.length) html += `<li class="empty">No folders or videos here</li>`;
+  } else {
+    html = d.files.length
+      ? sort(d.files).map(f => `<li data-file="${esc(f.path)}"><span class="ico">🎬</span><span class="nm">${esc(f.name)}</span><span class="sub">${esc(byDate() ? fmtDate(f.added) : f.folder)}</span></li>`).join("")
+        + (d.truncated ? `<li class="empty">Showing first 200 matches</li>` : "")
+      : `<li class="empty">No matches</li>`;
+  }
+  $("#list").innerHTML = html;
+  markSelected();
+}
+
+async function browse(path) {
+  currentPath = path;
+  renderCrumbs(path);
+  const list = $("#list");
+  list.innerHTML = `<li class="empty">Loading…</li>`;
+  try {
+    const d = await api("/api/browse?path=" + encodeURIComponent(path));
+    listing = { mode: "browse", path, dirs: d.dirs, files: d.files };
+    renderList();
+  } catch (e) {
+    list.innerHTML = `<li class="empty">${esc(e.message)}</li>`;
+  }
+}
+
+let searchTimer;
+$("#search").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  const q = $("#search").value.trim();
+  if (!q) { browse(currentPath); return; }
+  searchTimer = setTimeout(async () => {
+    const list = $("#list");
+    if (q.length < 2) return;
+    list.innerHTML = `<li class="empty">Searching…</li>`;
+    try {
+      const d = await api("/api/search?q=" + encodeURIComponent(q));
+      listing = { mode: "search", files: d.files, truncated: d.truncated };
+      renderList();
+    } catch (e) { list.innerHTML = `<li class="empty">${esc(e.message)}</li>`; }
+  }, 250);
+});
+
+$("#list").addEventListener("click", e => {
+  const li = e.target.closest("li");
+  if (!li) return;
+  if (li.dataset.dir !== undefined) browse(li.dataset.dir);
+  else if (li.dataset.file) selectMovie(li.dataset.file);
+});
+function markSelected() {
+  document.querySelectorAll("#list li").forEach(li =>
+    li.classList.toggle("sel", !!current && li.dataset.file === current.path));
+}
+
+/* ---------- movie detail ---------- */
+function trackLabel(t, i) {
+  const bits = [];
+  bits.push(t.language ? t.language.toUpperCase() : "Unknown");
+  if (t.title) bits.push(t.title);
+  const tech = [t.codec];
+  if (t.channels) tech.push(t.layout || t.channels + "ch");
+  if (t.forced) tech.push("forced");
+  if (t.default) tech.push("default");
+  return `#${i + 1} · ${bits.join(" — ")} (${tech.filter(Boolean).join(", ")})`;
+}
+
+async function selectMovie(path) {
+  const box = $("#detail");
+  box.innerHTML = `<div class="placeholder">Reading tracks…</div>`;
+  try {
+    current = await api("/api/probe?path=" + encodeURIComponent(path));
+  } catch (e) {
+    current = null;
+    box.innerHTML = `<div class="placeholder error">${esc(e.message)}</div>`;
+    return;
+  }
+  markSelected();
+  const m = current;
+  const v = m.video || {};
+  const meta = [fmtTime(m.duration), v.width ? `${v.width}×${v.height}` : "", v.codec, v.hdr || v.pix_fmt]
+    .filter(Boolean).join(" · ");
+
+  const defAudio = Math.max(0, m.audio.findIndex(a => a.default));
+  const audioOpts = m.audio.map((a, i) =>
+    `<option value="${i}" ${i === defAudio ? "selected" : ""}>${esc(trackLabel(a, i))}</option>`).join("");
+
+  let subOpts = `<option value="">None</option>`;
+  if (m.subtitles.length) {
+    subOpts += `<optgroup label="Embedded">` + m.subtitles.map((s, i) =>
+      `<option value="i:${i}">${esc(trackLabel(s, i))}${s.kind === "image" ? " [image]" : ""}</option>`).join("") + `</optgroup>`;
+  }
+  if (m.external_subtitles.length) {
+    subOpts += `<optgroup label="External files">` + m.external_subtitles.map((s, i) =>
+      `<option value="e:${i}">${esc(s.label)} — ${esc(s.file)}</option>`).join("") + `</optgroup>`;
+  }
+
+  const h = cfg.max_height;
+  const heights = [[0, "Original"], [2160, "2160p"], [1080, "1080p"], [720, "720p"], [480, "480p"]];
+  const brs = ["2M", "3M", "4M", "6M", "8M", "10M", "15M"];
+  if (!brs.includes(cfg.bitrate)) brs.push(cfg.bitrate);
+
+  box.innerHTML = `
+    <h2>${esc(m.name)}</h2>
+    <div class="meta">${esc(meta)}</div>
+
+    <div class="field"><label for="fAudio">Audio track</label>
+      <select id="fAudio">${audioOpts || `<option value="0">No audio found</option>`}</select></div>
+
+    <div class="field"><label for="fSub">Subtitles (burned in)</label>
+      <select id="fSub">${subOpts}</select>
+      <div class="hint">RTMP can't carry subtitle tracks, so the selected one is drawn onto the video.</div></div>
+
+    <div class="row2">
+      <div class="field"><label for="fRes">Max resolution</label>
+        <select id="fRes">${heights.map(([v, l]) => `<option value="${v}" ${v === h ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="field"><label for="fBr">Video bitrate</label>
+        <select id="fBr">${brs.map(b => `<option ${b === cfg.bitrate ? "selected" : ""}>${b}</option>`).join("")}</select></div>
+    </div>
+
+    <div class="field"><label for="fStart">Start at (h:mm:ss)</label>
+      <input type="text" id="fStart" placeholder="0:00" inputmode="numeric"></div>
+
+    ${v.hdr ? `<label class="check"><input type="checkbox" id="fTm" checked>
+      Tone-map HDR → SDR (fixes washed-out colours)</label>
+      ${/Dolby Vision P5/.test(v.hdr) ? `<div class="hint" style="margin:-8px 0 14px">Dolby Vision profile 5 has no HDR10 fallback, so colours may still look off. Use a different release if you can.</div>` : ""}` : ""}
+
+    ${cfg.encoder !== "x264" ? `<label class="check"><input type="checkbox" id="fHw" checked>
+      Hardware decoding (untick if a file fails to start)</label>` : ""}
+
+    <div class="btnrow">
+      <button class="btn primary" id="goBtn">▶ Play now</button>
+      <button class="btn" id="qBtn">+ Add to queue</button>
+    </div>
+    <div class="error" id="goErr"></div>
+    <div class="dest">Streaming to <span class="destLabel"></span> · <a class="openSettings">change</a></div>
+  `;
+  renderDest();
+  box.querySelector(".openSettings").addEventListener("click", () => toggleSettings(true));
+  // Text subs get extracted in the background as soon as they're picked.
+  $("#fSub").addEventListener("change", () => {
+    const sv = $("#fSub").value;
+    if (!sv.startsWith("i:")) return;
+    const s = m.subtitles[+sv.slice(2)];
+    if (s.kind === "image") return;
+    fetch("/api/prepare_sub", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: m.path, index: s.index, codec: s.codec }) }).catch(() => {});
+  });
+  $("#goBtn").addEventListener("click", () => submitMovie("play"));
+  $("#qBtn").addEventListener("click", () => submitMovie("queue"));
+}
+
+const post = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(body || {}) });
+
+async function submitMovie(mode) {
+  const m = current; if (!m) return;
+  const err = $("#goErr"); err.textContent = ""; err.className = "error";
+  if (!dest.server || /YOUR_VPS/i.test(dest.server)) {
+    err.textContent = "Set your server and stream key first (⚙ Stream settings).";
+    toggleSettings(true); return;
+  }
+  const start = parseTime($("#fStart").value);
+  if (isNaN(start)) { err.textContent = "Start time should look like 1:23:45"; return; }
+
+  let subtitle = null, subLabel = "No subs";
+  const sv = $("#fSub").value;
+  if (sv.startsWith("i:")) {
+    const s = m.subtitles[+sv.slice(2)];
+    subtitle = { type: "internal", index: s.index, kind: s.kind, codec: s.codec };
+    subLabel = "Subs: " + (s.language || "und").toUpperCase() + (s.forced ? " forced" : "");
+  } else if (sv.startsWith("e:")) {
+    const s = m.external_subtitles[+sv.slice(2)];
+    subtitle = { type: "external", file: s.file };
+    subLabel = "Subs: " + s.label;
+  }
+  const a = m.audio[+$("#fAudio").value];
+  const label = [a ? `${(a.language || "und").toUpperCase()} ${a.codec || ""}${a.channels ? " " + (a.layout || a.channels + "ch") : ""}` : "",
+                 subLabel, start ? "from " + fmtTime(start) : ""].filter(Boolean).join(" · ");
+  const body = {
+    label,
+    path: m.path,
+    audio: +$("#fAudio").value,
+    subtitle,
+    start,
+    max_height: +$("#fRes").value,
+    bitrate: $("#fBr").value,
+    hw_decode: $("#fHw") ? $("#fHw").checked : false,
+    tonemap: $("#fTm") ? $("#fTm").checked : false,
+    duration: m.duration,
+  };
+  const btn = mode === "play" ? $("#goBtn") : $("#qBtn"), txt = btn.textContent;
+  btn.disabled = true;
+  try {
+    await api(mode === "play" ? "/api/play" : "/api/queue", post(body));
+    if (mode === "queue") { err.className = "ok-msg"; err.textContent = "Added to the queue ✓"; }
+    pollStatus();
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = txt;
+  }
+}
+
+/* ---------- now playing ---------- */
+let last = null, seekHold = 0, lastQueueSig = "";
+const active = (s) => s && (s.state === "playing" || s.state === "preparing");
+
+async function control(url, opts) {
+  try { await api(url, opts || post()); } catch (e) { alert(e.message); }
+  pollStatus();
+}
+$("#stopBtn").addEventListener("click", () => control("/api/stop"));
+$("#nextBtn").addEventListener("click", () => control("/api/skip"));
+$("#qStart").addEventListener("click", () => control("/api/queue/start"));
+$("#qClear").addEventListener("click", () => { if (confirm("Remove everything from the queue?")) control("/api/queue/clear"); });
+
+function setBar(pos) {
+  const pct = duration && pos != null ? Math.min(100, pos / duration * 100) : 0;
+  $("#nowBar").style.width = pct + "%";
+  $("#tPos").textContent = pos != null ? fmtTime(pos) : "";
+  $("#seek").setAttribute("aria-valuenow", Math.round(pos || 0));
+}
+
+/* seek: click/tap anywhere on the bar, or arrow keys (±30s) when it has focus */
+const seekEl = $("#seek");
+const canSeek = () => last && last.current && duration > 0;
+function fracAt(x) { const r = seekEl.getBoundingClientRect(); return Math.min(1, Math.max(0, (x - r.left) / r.width)); }
+function doSeek(pos) {
+  if (!canSeek()) return;
+  pos = Math.max(0, Math.min(duration - 3, pos));
+  seekHold = Date.now() + 4000;          // don't let polling snap the bar back while it restarts
+  $("#nowBar").style.transition = "none"; setBar(pos);
+  requestAnimationFrame(() => $("#nowBar").style.transition = "");
+  control("/api/seek", post({ position: pos }));
+}
+seekEl.addEventListener("pointermove", e => {
+  if (!canSeek()) return;
+  const f = fracAt(e.clientX), tip = $("#seekTip");
+  tip.textContent = fmtTime(f * duration); tip.style.left = f * 100 + "%";
+  $("#seekGhost").style.width = f * 100 + "%";
+});
+seekEl.addEventListener("pointerleave", () => $("#seekGhost").style.width = "0");
+seekEl.addEventListener("click", e => doSeek(fracAt(e.clientX) * duration));
+let keyTarget = null, keyTimer;
+seekEl.addEventListener("keydown", e => {
+  if (!canSeek() || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+  e.preventDefault();
+  keyTarget = Math.max(0, (keyTarget ?? last.position ?? 0) + (e.key === "ArrowRight" ? 30 : -30));
+  setBar(keyTarget); seekHold = Date.now() + 4000;
+  clearTimeout(keyTimer);
+  keyTimer = setTimeout(() => { doSeek(keyTarget); keyTarget = null; }, 600);
+});
+
+/* ---------- queue ---------- */
+function renderQueue(s) {
+  const q = s.queue || [];
+  $("#qCount").textContent = q.length ? `(${q.length})` : "";
+  $("#qStart").style.display = q.length && !active(s) ? "" : "none";
+  $("#qClear").style.display = q.length ? "" : "none";
+  const sig = q.map(i => i.id).join(",");
+  if (sig === lastQueueSig) return;
+  lastQueueSig = sig;
+  $("#queue").innerHTML = q.length ? q.map((it, n) => `
+    <li data-id="${esc(it.id)}">
+      <span class="n">${n + 1}</span>
+      <div class="info"><div class="t" title="${esc(it.name)}">${esc(it.name)}</div>
+        <div class="l">${esc([it.duration ? fmtTime(it.duration) : "", it.label].filter(Boolean).join(" · "))}</div></div>
+      <button class="ib" data-a="play" title="Play now" aria-label="Play now">▶</button>
+      <button class="ib" data-a="up" title="Move up" aria-label="Move up" ${n === 0 ? "disabled" : ""}>↑</button>
+      <button class="ib" data-a="down" title="Move down" aria-label="Move down" ${n === q.length - 1 ? "disabled" : ""}>↓</button>
+      <button class="ib" data-a="rm" title="Remove" aria-label="Remove">✕</button>
+    </li>`).join("")
+    : `<li class="q-empty">Nothing queued. Pick a movie and choose “Add to queue”. Queued movies play one after another automatically.</li>`;
+}
+$("#queue").addEventListener("click", e => {
+  const b = e.target.closest("button[data-a]"); if (!b) return;
+  const id = encodeURIComponent(b.closest("li").dataset.id), a = b.dataset.a;
+  if (a === "rm") control(`/api/queue/${id}`, { method: "DELETE" });
+  else if (a === "play") control(`/api/queue/${id}/play`);
+  else control(`/api/queue/${id}/move`, post({ dir: a === "up" ? -1 : 1 }));
+});
+
+/* ---------- status polling ---------- */
+async function pollStatus() {
+  let s;
+  try { s = await api("/api/status"); } catch { return; }
+  last = s;
+  renderQueue(s);
+  const now = $("#now"), cur = s.current;
+  if (!cur) { now.classList.remove("show"); return; }
+  now.classList.add("show");
+  const failed = s.state === "failed";
+  $("#nowDot").className = "dot" + (s.state === "preparing" ? " prep" : s.state === "playing" ? " live" : failed ? " err" : "");
+  $("#nowTitle").textContent = (s.state === "preparing" ? s.preparing + "… " : s.state === "playing" ? "Streaming: " : failed ? "Failed: " : "") + cur.name;
+  duration = cur.duration || 0;
+  const stats = [];
+  if (s.speed) stats.push(s.speed.trim());
+  if (s.fps) stats.push(Math.round(+s.fps) + " fps");
+  $("#nowStats").textContent = stats.join(" · ");
+  if (Date.now() > seekHold) setBar(s.position);
+  $("#tDur").textContent = duration ? fmtTime(duration) : "";
+  $("#nowLabel").textContent = cur.label || "";
+  seekEl.classList.toggle("disabled", !duration);
+  seekEl.setAttribute("aria-valuemax", Math.round(duration));
+  $("#nextBtn").style.display = s.queue.length ? "" : "none";
+  $("#stopBtn").textContent = failed ? "✕ Dismiss" : "■ Stop";
+  const log = $("#log");
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 10;
+  log.textContent = s.log.join("\n");
+  if (atBottom) log.scrollTop = log.scrollHeight;
+  if (failed) $("#now details").open = true;
+}
+
+/* ---------- stream settings (server + key, like OBS) ---------- */
+let dest = { server: "", key: "", url: "" };
+const masked = (d) => d.server ? d.server + (d.key ? "/" + "•".repeat(Math.min(d.key.length, 8)) : "") : "not set";
+
+function renderDest() {
+  $("#outLabel").textContent = "→ " + masked(dest);
+  document.querySelectorAll(".destLabel").forEach(e => e.textContent = masked(dest));
+  $("#vlcUrl").textContent = dest.url || "—";
+}
+function toggleSettings(show) {
+  const el = $("#settings");
+  show = show ?? !el.classList.contains("show");
+  el.classList.toggle("show", show);
+  $("#setBtn").setAttribute("aria-expanded", show);
+  if (show) {
+    $("#sServer").value = dest.server; $("#sKey").value = dest.key; $("#sMsg").textContent = "";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    $("#sServer").focus();
+  }
+}
+$("#setBtn").addEventListener("click", () => toggleSettings());
+$("#sShow").addEventListener("click", () => {
+  const k = $("#sKey"), show = k.type === "password";
+  k.type = show ? "text" : "password"; $("#sShow").textContent = show ? "Hide" : "Show";
+});
+function previewVlc() {
+  const s = $("#sServer").value.trim().replace(/\/+$/, ""), k = $("#sKey").value.trim();
+  $("#vlcUrl").textContent = s ? s + (k ? "/" + k : "") : "—";
+}
+$("#sServer").addEventListener("input", previewVlc);
+$("#sKey").addEventListener("input", previewVlc);
+async function saveSettings() {
+  const msg = $("#sMsg"); msg.textContent = "Saving…"; msg.className = "hint";
+  try {
+    dest = await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ server: $("#sServer").value, key: $("#sKey").value }) });
+    renderDest(); msg.textContent = "Saved ✓";
+  } catch (e) { msg.textContent = e.message; msg.className = "error"; }
+}
+$("#sSave").addEventListener("click", saveSettings);
+[$("#sServer"), $("#sKey")].forEach(i => i.addEventListener("keydown", e => { if (e.key === "Enter") saveSettings(); }));
+
+(async function init() {
+  try { cfg = await api("/api/config"); } catch (e) { cfg = { encoder: "vaapi", bitrate: "6M", max_height: 1080 }; }
+  try { dest = await api("/api/settings"); } catch {}
+  renderDest();
+  if (!dest.server || /YOUR_VPS/i.test(dest.server)) toggleSettings(true);
+  browse("");
+  pollStatus();
+  setInterval(pollStatus, 2000);
+})();
+</script>
+</body>
+</html>

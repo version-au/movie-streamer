@@ -1,0 +1,20 @@
+[Unit]
+Description=Movie Streamer web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=streamer
+Group=streamer
+SupplementaryGroups=render video
+WorkingDirectory=/opt/movie-streamer
+EnvironmentFile=/etc/movie-streamer.env
+ExecStart=/opt/movie-streamer/venv/bin/python /opt/movie-streamer/app.py
+CacheDirectory=movie-streamer
+StateDirectory=movie-streamer
+StateDirectoryMode=0700
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

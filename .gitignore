@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+# local overrides with real settings (server, stream key, password)
+*.local.env
